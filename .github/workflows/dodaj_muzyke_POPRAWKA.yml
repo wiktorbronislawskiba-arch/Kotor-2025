@@ -1,4 +1,4 @@
-+name: Dodaj romantyczna muzyke balkanska
+name: Dodaj romantyczna muzyke balkanska
 
 on:
   workflow_dispatch:
