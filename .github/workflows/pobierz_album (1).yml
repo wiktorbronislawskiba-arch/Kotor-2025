@@ -1,0 +1,69 @@
+name: Przygotuj prywatny podglad albumu
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  album:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Zainstaluj przegladarke
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: Zrob prywatne podglady bez pobierania 4 GB
+        env:
+          ALBUM_URL: https://quickshare.samsungcloud.com/xvFxekxcS1PQ
+        run: |
+          mkdir -p podglad
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage({
+              viewport: { width: 1440, height: 1200 },
+              deviceScaleFactor: 1,
+              locale: 'pl-PL'
+            });
+            await page.goto(process.env.ALBUM_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            await page.waitForTimeout(10000);
+            let lastHeight = 0;
+            for (let i = 1; i <= 80; i++) {
+              await page.screenshot({
+                path: `podglad/ekran-${String(i).padStart(2,'0')}.jpg`,
+                type: 'jpeg',
+                quality: 76
+              });
+              const info = await page.evaluate(() => ({
+                y: window.scrollY,
+                h: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+                vh: window.innerHeight
+              }));
+              console.log(`Podglad ${i}: pozycja ${info.y} / ${info.h}`);
+              if (info.y + info.vh >= info.h - 20 && info.h === lastHeight) break;
+              lastHeight = info.h;
+              await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.82)));
+              await page.waitForTimeout(1600);
+            }
+            await browser.close();
+          })();
+          NODE
+
+      - name: Zapisz prywatny artefakt na 1 dzien
+        uses: actions/upload-artifact@v4
+        with:
+          name: prywatne-podglady-kotor
+          path: podglad/
+          retention-days: 1
+          if-no-files-found: error
