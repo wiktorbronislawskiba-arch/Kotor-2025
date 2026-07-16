@@ -1,0 +1,71 @@
+name: Podziel prywatne zdjecia na czesci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  podzial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pobierz istniejacy prywatny artefakt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p wejscie
+          gh run download 29519205501 -n ponumerowane-prywatne-zdjecia -D wejscie
+
+      - name: Podziel pliki na prywatne paczki do 300 MB
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('wejscie')
+          files=sorted([p for p in root.rglob('*') if p.is_file()])
+          limit=300*1024*1024
+          part=1; used=0
+          for src in files:
+              size=src.stat().st_size
+              if used and used+size>limit:
+                  part+=1; used=0
+              dst=Path(f'czesc-{part}')/src.relative_to(root)
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(src,dst)
+              used+=size
+          print(f'Utworzono {part} czesci z {len(files)} plikow')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prywatne-zdjecia-czesc-1
+          path: czesc-1/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prywatne-zdjecia-czesc-2
+          path: czesc-2/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prywatne-zdjecia-czesc-3
+          path: czesc-3/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prywatne-zdjecia-czesc-4
+          path: czesc-4/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: ignore
