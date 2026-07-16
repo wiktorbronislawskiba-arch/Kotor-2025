@@ -1,0 +1,109 @@
+name: Ponumeruj prywatnie zdjecia
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerowanie:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Zainstaluj przegladarke
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: Zbierz i ponumeruj prywatne miniatury
+        env:
+          ALBUM_URL: https://quickshare.samsungcloud.com/xvFxekxcS1PQ
+        run: |
+          mkdir -p miniatury
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const crypto = require('crypto');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'pl-PL' });
+            const page = await context.newPage();
+            const urls = new Map();
+            page.on('response', async response => {
+              try {
+                const type = (await response.headerValue('content-type') || '').toLowerCase();
+                if (type.startsWith('image/') && !response.url().includes('data:')) {
+                  const url = response.url();
+                  if (!urls.has(url)) urls.set(url, { url, type });
+                }
+              } catch {}
+            });
+            await page.goto(process.env.ALBUM_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            await page.waitForTimeout(10000);
+            let stable = 0, previous = 0;
+            for (let i = 0; i < 120 && stable < 8; i++) {
+              const domUrls = await page.evaluate(() => Array.from(document.images).map(x => x.currentSrc || x.src).filter(Boolean));
+              for (const url of domUrls) if (!urls.has(url)) urls.set(url, { url, type: '' });
+              await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.55)));
+              await page.waitForTimeout(2500);
+              stable = urls.size === previous ? stable + 1 : 0;
+              previous = urls.size;
+              console.log(`Krok ${i+1}: ${urls.size} adresow obrazow`);
+            }
+            const entries = [...urls.values()].filter(x => !/logo|icon|favicon/i.test(x.url));
+            const mapa = [];
+            let nr = 0;
+            for (const item of entries) {
+              try {
+                const res = await context.request.get(item.url, { timeout: 60000 });
+                if (!res.ok()) continue;
+                const body = await res.body();
+                if (body.length < 5000) continue;
+                nr++;
+                const type = (res.headers()['content-type'] || item.type || '').toLowerCase();
+                const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg';
+                const file = `miniatury/${String(nr).padStart(4,'0')}.${ext}`;
+                fs.writeFileSync(file, body);
+                mapa.push({ nr, file, bytes: body.length, source_hash: crypto.createHash('sha1').update(item.url).digest('hex') });
+              } catch (e) { console.log('Pominieto obraz:', e.message); }
+            }
+            fs.writeFileSync('miniatury/mapa.json', JSON.stringify(mapa, null, 2));
+            console.log(`Zapisano ${mapa.length} prywatnych miniatur`);
+            await browser.close();
+          })();
+          NODE
+
+      - name: Zrob ponumerowane arkusze
+        run: |
+          python -m pip install --quiet pillow
+          python <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageOps, ImageDraw
+          files=sorted([p for p in Path('miniatury').iterdir() if p.suffix.lower() in {'.jpg','.png','.webp'}])
+          out=Path('arkusze'); out.mkdir(exist_ok=True)
+          for s,start in enumerate(range(0,len(files),30),1):
+              sheet=Image.new('RGB',(1500,1000),(18,18,18)); draw=ImageDraw.Draw(sheet)
+              for pos,p in enumerate(files[start:start+30]):
+                  try:
+                      im=ImageOps.fit(Image.open(p).convert('RGB'),(240,180),method=Image.Resampling.LANCZOS)
+                      x=(pos%6)*250+5; y=(pos//6)*200+5
+                      sheet.paste(im,(x,y+15)); draw.text((x,y),p.stem,fill='white')
+                  except Exception: pass
+              sheet.save(out/f'arkusz-{s:02d}.jpg',quality=84,optimize=True)
+          PY
+
+      - name: Zapisz prywatny artefakt na 1 dzien
+        uses: actions/upload-artifact@v4
+        with:
+          name: ponumerowane-prywatne-zdjecia
+          path: |
+            miniatury/
+            arkusze/
+          retention-days: 1
+          if-no-files-found: error
