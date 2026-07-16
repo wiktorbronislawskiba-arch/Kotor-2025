@@ -1,0 +1,39 @@
+name: Zbuduj finalny pokaz Kotor 2025
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  budowa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pobierz prywatne czesci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p material
+          gh run download 29521052198 -n prywatne-zdjecia-czesc-1 -D material
+          gh run download 29521052198 -n prywatne-zdjecia-czesc-2 -D material
+          gh run download 29521052198 -n prywatne-zdjecia-czesc-3 -D material
+
+      - name: Wybierz 42 kadry
+        run: |
+          mkdir -p photos
+          for n in 0002 0013 0018 0159 0164 0166 0175 0252 0253 0257 0269 0334 0347 0354 0426 0431 0440 0512 0518 0527 0533 0604 0605 0607 0609 0616 0698 0699 0715 0800 0872 0874 0965 0978 1060 1073 1080 1160 1164 1170 1243 1245; do
+            cp "material/miniatury/$n.jpg" "photos/$n.jpg"
+          done
+
+      - name: Opublikuj wybrane zdjecia
+        run: |
+          git config user.name "Kotor Album Bot"
+          git config user.email "actions@github.com"
+          git add photos
+          git commit -m "Dodaj wybrane zdjecia do pokazu"
+          git push
