@@ -1,0 +1,99 @@
+name: Przygotuj podglad albumu
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  album:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Zainstaluj przegladarke
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: Pobierz album bezposrednio Samsung -> GitHub
+        env:
+          ALBUM_URL: https://quickshare.samsungcloud.com/xvFxekxcS1PQ
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          (async () => {
+            fs.mkdirSync('album-download', { recursive: true });
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage({ acceptDownloads: true, locale: 'pl-PL' });
+            await page.goto(process.env.ALBUM_URL, { waitUntil: 'networkidle', timeout: 120000 });
+            const button = page.getByText(/pobierz|download/i).first();
+            await button.waitFor({ state: 'visible', timeout: 120000 });
+            const downloadPromise = page.waitForEvent('download', { timeout: 14400000 });
+            await button.click();
+            const download = await downloadPromise;
+            await download.saveAs('album-download/' + download.suggestedFilename());
+            await browser.close();
+          })();
+          NODE
+
+      - name: Rozpakuj i zrob lekkie arkusze podgladowe
+        run: |
+          mkdir -p album-files podglad
+          find album-download -type f -print0 | while IFS= read -r -d '' f; do
+            7z x -y "$f" -oalbum-files >/dev/null || cp "$f" album-files/
+          done
+          python -m pip install --quiet pillow pillow-heif
+          python <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageOps, ImageDraw
+          import json, math
+          try:
+              from pillow_heif import register_heif_opener
+              register_heif_opener()
+          except Exception:
+              pass
+
+          exts={'.jpg','.jpeg','.png','.webp','.heic','.heif'}
+          files=[p for p in Path('album-files').rglob('*') if p.suffix.lower() in exts]
+          files.sort(key=lambda p: str(p).lower())
+          inventory=[]
+          thumbs=[]
+          for i,p in enumerate(files):
+              try:
+                  im=Image.open(p)
+                  im=ImageOps.exif_transpose(im).convert('RGB')
+                  inventory.append({'nr':i+1,'plik':str(p.relative_to('album-files')),'szerokosc':im.width,'wysokosc':im.height})
+                  thumb=ImageOps.fit(im,(240,180),method=Image.Resampling.LANCZOS)
+                  thumbs.append((i+1,thumb))
+              except Exception as e:
+                  print('Pominieto',p,e)
+
+          Path('podglad').mkdir(exist_ok=True)
+          for sheet_no,start in enumerate(range(0,len(thumbs),30),1):
+              group=thumbs[start:start+30]
+              sheet=Image.new('RGB',(1500,1000),(20,20,20))
+              draw=ImageDraw.Draw(sheet)
+              for pos,(nr,im) in enumerate(group):
+                  x=(pos%6)*250+5; y=(pos//6)*200+5
+                  sheet.paste(im,(x,y+15))
+                  draw.text((x,y),f'{nr:04d}',fill='white')
+              sheet.save(f'podglad/arkusz-{sheet_no:02d}.jpg',quality=82,optimize=True)
+          Path('podglad/lista.json').write_text(json.dumps(inventory,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(f'Gotowe: {len(inventory)} zdjec, {math.ceil(len(thumbs)/30)} arkuszy')
+          PY
+
+      - name: Zapisz podglady w repozytorium
+        run: |
+          git config user.name "Kotor Album Bot"
+          git config user.email "actions@github.com"
+          git add podglad
+          git commit -m "Dodaj arkusze podgladowe albumu"
+          git push
