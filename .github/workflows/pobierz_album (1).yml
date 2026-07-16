@@ -1,4 +1,4 @@
-name: Przygotuj prywatny podglad albumu
+name: Dokladny prywatny podglad albumu
 
 on:
   workflow_dispatch:
@@ -32,14 +32,14 @@ jobs:
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage({
-              viewport: { width: 1440, height: 1200 },
+              viewport: { width: 1440, height: 900 },
               deviceScaleFactor: 1,
               locale: 'pl-PL'
             });
             await page.goto(process.env.ALBUM_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
             await page.waitForTimeout(10000);
             let lastHeight = 0;
-            for (let i = 1; i <= 80; i++) {
+            for (let i = 1; i <= 100; i++) {
               await page.screenshot({
                 path: `podglad/ekran-${String(i).padStart(2,'0')}.jpg`,
                 type: 'jpeg',
@@ -53,8 +53,8 @@ jobs:
               console.log(`Podglad ${i}: pozycja ${info.y} / ${info.h}`);
               if (info.y + info.vh >= info.h - 20 && info.h === lastHeight) break;
               lastHeight = info.h;
-              await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.82)));
-              await page.waitForTimeout(1600);
+              await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.55)));
+              await page.waitForTimeout(6500);
             }
             await browser.close();
           })();
@@ -63,7 +63,7 @@ jobs:
       - name: Zapisz prywatny artefakt na 1 dzien
         uses: actions/upload-artifact@v4
         with:
-          name: prywatne-podglady-kotor
+          name: dokladne-prywatne-podglady-kotor
           path: podglad/
           retention-days: 1
           if-no-files-found: error
