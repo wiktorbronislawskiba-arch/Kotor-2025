@@ -1,0 +1,65 @@
++name: Dodaj romantyczna muzyke balkanska
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  muzyka:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Pobierz legalny utwor z Pixabay
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+          mkdir -p music
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const context=await browser.newContext();
+            const page=await context.newPage();
+            const urls=[];
+            page.on('response',async r=>{
+              try{const t=(await r.headerValue('content-type')||'').toLowerCase();if(t.includes('audio')||/\.mp3(\?|$)/i.test(r.url()))urls.push(r.url())}catch{}
+            });
+            await page.goto('https://pixabay.com/music/folk-the-balkan-road-329132/',{waitUntil:'domcontentloaded',timeout:120000});
+            await page.waitForTimeout(5000);
+            const play=page.locator('button[aria-label*="play" i],button[title*="play" i]').first();
+            if(await play.count())await play.click({force:true}).catch(()=>{});
+            else {
+              const buttons=page.locator('button');
+              for(let i=0;i<Math.min(await buttons.count(),30);i++){
+                const b=buttons.nth(i),txt=((await b.innerText().catch(()=>''))+' '+(await b.getAttribute('aria-label')||'')).toLowerCase();
+                if(txt.includes('play')||txt.includes('odtw')){await b.click({force:true}).catch(()=>{});break}
+              }
+            }
+            await page.waitForTimeout(10000);
+            const dom=await page.evaluate(()=>[...document.querySelectorAll('audio, audio source')].map(x=>x.currentSrc||x.src).filter(Boolean));
+            urls.push(...dom);
+            const resources=await page.evaluate(()=>performance.getEntriesByType('resource').map(x=>x.name).filter(x=>/\.mp3(\?|$)/i.test(x)));
+            urls.push(...resources);
+            const html=await page.content();
+            const raw=html.match(/https?:[^"'\\ ]+\.mp3[^"'\\ <]*/gi)||[];
+            urls.push(...raw.map(x=>x.replaceAll('&amp;','&')));
+            let saved=false;
+            for(const u of [...new Set(urls)]){try{const r=await context.request.get(u,{timeout:120000});if(!r.ok())continue;const b=await r.body();if(b.length>500000){fs.writeFileSync('music/the-balkan-road.mp3',b);saved=true;break}}catch{}}
+            await browser.close();
+            if(!saved)throw new Error('Nie znaleziono pliku MP3 utworu');
+          })();
+          NODE
+      - name: Zapisz muzyke w stronie
+        run: |
+          git config user.name "Kotor Album Bot"
+          git config user.email "actions@github.com"
+          git add music/the-balkan-road.mp3
+          git commit -m "Dodaj romantyczna muzyke balkanska"
+          git push
